@@ -234,6 +234,14 @@ hr.separator{border:0;border-top:1px solid #e4ddf7;margin:20px 0}
         <button class="button-soft" id="folderBackBtn">← Retour à la classe</button>
       </div>
     </div>
+    <div id="dialogueAudioPanel" class="panel" style="margin-bottom:22px">
+      <div class="top" style="margin-bottom:12px"><div><p class="eyebrow">Compréhension orale</p><h3>🎧 Enregistrement des dialogues</h3><p class="muted">Leçon 4 : « Désolé, je suis touriste… » et « Une fête Erasmus »</p></div><span class="tag">Environ 1 min 20</span></div>
+      <audio id="dialogueAudio" controls preload="metadata" style="display:block;width:100%;margin:16px 0" aria-label="Enregistrement de la leçon 4"></audio>
+      <div class="toolbar"><button id="audioBackBtn" class="button-soft small" type="button">↶ Reculer de 10 secondes</button><button id="audioReplayBtn" class="button-soft small" type="button">↺ Recommencer</button><label for="dialogueFile" class="button-soft small" style="cursor:pointer;border-radius:14px;padding:8px 12px;font-weight:800">📁 Charger le MP3 de mon ordinateur</label></div>
+      <input type="file" id="dialogueFile" accept="audio/mpeg,audio/mp3,audio/mp4,audio/wav,audio/*" hidden>
+      <p id="audioInfo" class="hint" role="status">Chargement de l'enregistrement…</p>
+      <p class="hint">Le fichier sélectionné ici reste sur cet ordinateur : il n'est pas envoyé sur GitHub et n'est pas transmis aux smartphones.</p>
+    </div>
     <div id="quizGrid" class="cards-grid"></div>
     <div class="notice">Pour l'instant, le quiz 1 est prêt. Le quiz 2 est réservé pour le second ensemble d'activités.</div>
   </section>
@@ -287,7 +295,7 @@ hr.separator{border:0;border-top:1px solid #e4ddf7;margin:20px 0}
     </div>
   </section>
 
-  <div class="footer">Mon espace FLE · Version 10.0 · Dossiers et quiz interactifs avec QR code</div>
+  <div class="footer">Mon espace FLE · Version 11.0 · Dossiers et quiz interactifs avec QR code</div>
 </main>
 <input type="file" accept="application/json,.json" id="fileInput" hidden>
 <div id="modal" class="hidden" style="position:fixed;inset:0;background:rgba(35,22,66,.66);display:grid;place-items:center;padding:16px;z-index:30">
@@ -381,9 +389,21 @@ function initTeacherMode(){
   function renderClass(){const c=getClass();if(!c){renderHome();return;}$('classTitle').textContent=c.name;$('namesInput').value=c.names.join('\n');renderStudents();renderWheel();renderActivities();}
 
   function renderActivities(){const panel=$('activitiesPanel');const folders=folderCatalog[currentClassId]||[];let html=`<div class="top" style="margin-bottom:18px"><div><p class="eyebrow">Activités</p><h3>Dossiers pédagogiques</h3><p class="muted">Quiz, jeux et activités projetables pour la classe.</p></div></div>`; if(!folders.length){html+=`<p class="hint">Aucun dossier pédagogique n'est encore créé pour cette classe.</p>`;panel.innerHTML=html;return;} html+=`<div class="cards-grid">`+folders.map(f=>`<button class="folder-card" data-folder="${f.id}"><div class="tag">📁 Dossier</div><strong>${escapeHtml(f.title)}</strong><span>${escapeHtml(f.subtitle)}</span><div class="inline-note" style="margin-top:12px">${f.quizzes.filter(q=>q.ready).length} quiz prêt(s) · ${f.quizzes.filter(q=>!q.ready).length} à venir</div></button>`).join('')+`</div>`;panel.innerHTML=html;panel.querySelectorAll('[data-folder]').forEach(btn=>btn.onclick=()=>openFolder(btn.dataset.folder));}
-  function openFolder(folderId){currentFolderId=folderId;showSection('folder');setBack('Retour à la classe',()=>openClass(currentClassId));const folder=(folderCatalog[currentClassId]||[]).find(f=>f.id===folderId);if(!folder){openClass(currentClassId);return;}$('folderTitle').textContent=folder.title;$('folderSubtitle').textContent=folder.subtitle;const grid=$('quizGrid');grid.innerHTML='';folder.quizzes.forEach(q=>{const card=document.createElement('div');card.className='quiz-card';card.innerHTML=`<div class="tag">${q.ready?'🎯 Quiz prêt':'🕒 Bientôt'}</div><strong>${escapeHtml(q.title)}</strong><span>${escapeHtml(q.description)}</span><div class="toolbar" style="margin-top:16px">${q.ready?`<button data-launch="${q.id}">Lancer le quiz</button>`:`<button class="button-soft" disabled>À venir</button>`}</div>`;grid.appendChild(card);const launch=card.querySelector('[data-launch]');if(launch)launch.onclick=()=>launchQuiz(q.id);});}
+  let teacherAudioUrl=null;
+  function prepareDialogueAudio(){
+    const panel=$('dialogueAudioPanel'), audio=$('dialogueAudio'), info=$('audioInfo');
+    panel.classList.toggle('hidden',!(currentClassId==='classe1'&&currentFolderId==='touriste'));
+    if(panel.classList.contains('hidden')){audio.pause();return;}
+    if(!audio.src){audio.src='audio/desole-je-suis-touriste.mp3';}
+    info.textContent=teacherAudioUrl?'Fichier chargé depuis votre ordinateur.':'Si le fichier audio n’est pas publié sur votre site, utilisez « Charger le MP3 ».';
+  }
+  $('dialogueFile').addEventListener('change',e=>{const file=e.target.files?.[0];if(!file)return;const audio=$('dialogueAudio');audio.pause();if(teacherAudioUrl)URL.revokeObjectURL(teacherAudioUrl);teacherAudioUrl=URL.createObjectURL(file);audio.src=teacherAudioUrl;audio.load();$('audioInfo').textContent='Fichier local chargé : '+file.name;});
+  $('audioBackBtn').onclick=()=>{const a=$('dialogueAudio');a.currentTime=Math.max(0,(a.currentTime||0)-10);};
+  $('audioReplayBtn').onclick=()=>{const a=$('dialogueAudio');a.currentTime=0;a.play().catch(()=>{});};
+  $('dialogueAudio').addEventListener('error',()=>{if(!teacherAudioUrl)$('audioInfo').textContent='Enregistrement non présent sur ce site : chargez le MP3 depuis votre ordinateur.';});
+  function openFolder(folderId){currentFolderId=folderId;showSection('folder');setBack('Retour à la classe',()=>openClass(currentClassId));const folder=(folderCatalog[currentClassId]||[]).find(f=>f.id===folderId);if(!folder){openClass(currentClassId);return;}$('folderTitle').textContent=folder.title;$('folderSubtitle').textContent=folder.subtitle;prepareDialogueAudio();const grid=$('quizGrid');grid.innerHTML='';folder.quizzes.forEach(q=>{const card=document.createElement('div');card.className='quiz-card';card.innerHTML=`<div class="tag">${q.ready?'🎯 Quiz prêt':'🕒 Bientôt'}</div><strong>${escapeHtml(q.title)}</strong><span>${escapeHtml(q.description)}</span><div class="toolbar" style="margin-top:16px">${q.ready?`<button data-launch="${q.id}">Lancer le quiz</button>`:`<button class="button-soft" disabled>À venir</button>`}</div>`;grid.appendChild(card);const launch=card.querySelector('[data-launch]');if(launch)launch.onclick=()=>launchQuiz(q.id);});}
 
-  function launchQuiz(quizId){showSection('quiz');setBack('Retour au dossier',requestEndQuiz);const quiz=quizCatalog[quizId];$('liveQuizTitle').textContent=quiz.title;$('liveQuizSubtitle').textContent=quiz.subtitle;session={quizId,peer:null,participants:new Map(),slideIndex:0,reveal:false,qrUrl:'',questionResetCount:0};initSessionConnection();renderProjection();renderSessionPanels(); renderResults();}
+  function launchQuiz(quizId){$('dialogueAudio').pause();showSection('quiz');setBack('Retour au dossier',requestEndQuiz);const quiz=quizCatalog[quizId];$('liveQuizTitle').textContent=quiz.title;$('liveQuizSubtitle').textContent=quiz.subtitle;session={quizId,peer:null,participants:new Map(),slideIndex:0,reveal:false,qrUrl:'',questionResetCount:0};initSessionConnection();renderProjection();renderSessionPanels(); renderResults();}
   function closeLiveSession(){
     if(!session)return;
     for(const p of session.participants.values()){
