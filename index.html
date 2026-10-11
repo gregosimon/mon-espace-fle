@@ -165,14 +165,26 @@ hr.separator{border:0;border-top:1px solid #e4ddf7;margin:20px 0}
 </style>
 </head>
 <body>
-<div id="teacherApp">
+<div id="loginGate" style="min-height:100vh;display:grid;place-items:center;padding:22px;background:linear-gradient(145deg,#eae3ff,#f9f7ff)">
+  <form id="loginForm" class="panel" style="max-width:440px;width:100%">
+    <p class="eyebrow">Espace enseignant sécurisé · Version 15.1</p>
+    <h2 style="margin-bottom:12px">Mon espace FLE</h2>
+    <p class="muted">Connecte-toi à ton compte enseignant Supabase pour retrouver les classes synchronisées.</p>
+    <label class="field">Adresse e-mail <input id="loginEmail" type="email" required autocomplete="username" style="border:2px solid #eae4f8;border-radius:12px;padding:12px;width:100%"></label>
+    <label class="field">Mot de passe <input id="loginPassword" type="password" required autocomplete="current-password" style="border:2px solid #eae4f8;border-radius:12px;padding:12px;width:100%"></label>
+    <button id="loginSubmit" type="submit" style="width:100%">Se connecter</button>
+    <p id="loginError" role="alert" style="color:#bc3551;min-height:22px;font-size:13px"></p>
+    <p class="hint">Ne partage pas tes identifiants. Sur un ordinateur commun, déconnecte-toi après le cours.</p>
+  </form>
+</div>
+<div id="teacherApp" class="hidden">
 <header>
   <div>
     <button id="globalBack" class="back hidden">← Retour</button>
     <h1>Mon espace FLE</h1>
     <p>Classes, roue des prénoms et quiz interactifs</p>
   </div>
-  <span style="font-size:26px">✨</span>
+  <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span id="cloudStatus" role="status" style="font-size:12px;color:#6555a5">Connexion requise</span><button id="logoutBtn" class="button-soft small">Déconnexion</button></div>
 </header>
 <main>
   <section id="homeSection">
@@ -189,7 +201,7 @@ hr.separator{border:0;border-top:1px solid #e4ddf7;margin:20px 0}
       </div>
     </div>
     <div id="classGrid" class="classes"></div>
-    <div class="notice">Les données sont enregistrées dans ce navigateur. Pour retrouver tes classes sur un autre ordinateur, utilise « Exporter » puis « Importer ». Le mode QR / smartphone nécessite que cette page soit publiée en ligne ou ouverte via une adresse réseau.</div>
+    <div class="notice">Les classes sont synchronisées sur Supabase lorsque l’indicateur affiche « Synchronisé ». Les quiz restent accessibles par QR code. Sur un ordinateur partagé, déconnecte-toi après le cours.</div>
   </section>
 
   <section id="classSection" class="hidden">
@@ -318,7 +330,7 @@ hr.separator{border:0;border-top:1px solid #e4ddf7;margin:20px 0}
     </div>
   </section>
 
-  <div class="footer">Mon espace FLE · Version 14.0 · Deux lecteurs audio et deux quiz interactifs avec QR code et audio</div>
+  <div class="footer">Mon espace FLE · Version 15.1 · Deux lecteurs audio et deux quiz interactifs avec QR code et audio</div>
 </main>
 <input type="file" accept="application/json,.json" id="fileInput" hidden>
 <div id="modal" class="hidden" style="position:fixed;inset:0;background:rgba(35,22,66,.66);display:grid;place-items:center;padding:16px;z-index:30">
@@ -340,6 +352,34 @@ hr.separator{border:0;border-top:1px solid #e4ddf7;margin:20px 0}
 (()=>{
 'use strict';
 const KEY='mon-espace-fle-v7';
+const SUPABASE_URL='https://tqbaqdmtqgnfqtwqhgha.supabase.co';
+const SUPABASE_PUBLIC_KEY='sb_publishable_h9HdjlZD4AG1XhmPy6SZEg_aJLUJWyA';
+const SESSION_KEY='mon-espace-fle-supabase-session';
+let sbSession=null;
+function statusCloud(message,isError=false){const el=document.getElementById('cloudStatus');if(el){el.textContent=message;el.style.color=isError?'#c03953':'#6555a5';}}
+async function sbFetch(path,opts={}){
+  const headers={'apikey':SUPABASE_PUBLIC_KEY,'Content-Type':'application/json',...(opts.headers||{})};
+  if(sbSession?.access_token)headers.Authorization='Bearer '+sbSession.access_token;
+  const response=await fetch(SUPABASE_URL+path,{...opts,headers});
+  const raw=await response.text();let result;try{result=raw?JSON.parse(raw):null;}catch{result=raw;}
+  if(!response.ok)throw new Error(result?.message||result?.msg||result?.error_description||`Erreur HTTP ${response.status}`);
+  return result;
+}
+async function authenticate(email,password){
+  const session=await sbFetch('/auth/v1/token?grant_type=password',{method:'POST',body:JSON.stringify({email,password})});
+  if(!session?.access_token||!session?.user?.id)throw new Error('La connexion a échoué.');
+  sbSession=session;sessionStorage.setItem(SESSION_KEY,JSON.stringify(session));
+}
+async function refreshSession(){
+  if(!sbSession?.refresh_token)throw new Error('Session expirée : reconnecte-toi.');
+  const session=await sbFetch('/auth/v1/token?grant_type=refresh_token',{method:'POST',body:JSON.stringify({refresh_token:sbSession.refresh_token})});
+  sbSession=session;sessionStorage.setItem(SESSION_KEY,JSON.stringify(session));
+}
+async function sbAuthed(path,opts){
+  if(sbSession?.expires_at && Date.now()/1000>sbSession.expires_at-90)await refreshSession();
+  return sbFetch(path,opts);
+}
+
 const colors=['#8659df','#ff8c69','#46bfc0','#ffbf52','#eb6db7','#5c9bea','#9ac85c','#f18caa'];
 const confettiColors=['#ffd54a','#ff7e66','#8f67f9','#5fd4d5','#ff6fb8','#70c04f','#ffffff'];
 const starterClasses=[
@@ -410,8 +450,8 @@ const quizCatalog={
       ]},
       {type:'single',prompt:'Jessie est...',options:[
         {text:'Professeure de français',correct:false},
-        {text:'Professeur de Judo',correct:false},
-        {text:'Étudiante',correct:true},
+        {text:'Professeur de judo',correct:true},
+        {text:'Étudiante',correct:false},
         {text:'Médecin',correct:false}
       ]},
       {type:'multi',prompt:'Thomas est...',subtitle:"Vous pouvez sélectionner plus d'une réponse",options:[
@@ -427,10 +467,37 @@ const quizCatalog={
 const $=id=>document.getElementById(id);
 const params=new URLSearchParams(location.search);
 if(params.get('join')){initStudentMode(params.get('join'),params.get('quiz'));return;}
-initTeacherMode();
+const loginForm=document.getElementById('loginForm');
+loginForm.addEventListener('submit',async(event)=>{
+  event.preventDefault();const btn=document.getElementById('loginSubmit');btn.disabled=true;
+  document.getElementById('loginError').textContent='';
+  try{
+    await authenticate(document.getElementById('loginEmail').value.trim(),document.getElementById('loginPassword').value);
+    document.getElementById('loginPassword').value='';
+    await launchTeacher();
+  }catch(error){document.getElementById('loginError').textContent=error.message;sbSession=null;sessionStorage.removeItem(SESSION_KEY);}
+  finally{btn.disabled=false;}
+});
+async function launchTeacher(){
+  // Récupérer les données à distance AVANT d'afficher le panneau enseignant.
+  let rows;
+  try{rows=await sbAuthed('/rest/v1/teacher_workspace?select=classes,updated_at&user_id=eq.'+encodeURIComponent(sbSession.user.id),{method:'GET'});}
+  catch(error){throw new Error('Impossible de charger les données Supabase : '+error.message);}
+  document.getElementById('loginGate').classList.add('hidden');
+  document.getElementById('teacherApp').classList.remove('hidden');
+  initTeacherMode(rows);
+}
+if(new URLSearchParams(location.search).get('join')){ /* Mode élève géré en amont. */ }
+else{
+  try{sbSession=JSON.parse(sessionStorage.getItem(SESSION_KEY)||'null');}catch{}
+  if(sbSession?.access_token)launchTeacher().catch(error=>{document.getElementById('loginError').textContent=error.message;sessionStorage.removeItem(SESSION_KEY);sbSession=null;});
+}
 
-function initTeacherMode(){
-  let classes=loadClasses();
+function initTeacherMode(remoteRows){
+  let classes=Array.isArray(remoteRows?.[0]?.classes)?remoteRows[0].classes:clone(starterClasses);
+  let remoteStamp=remoteRows?.[0]?.updated_at||null;
+  let syncQueue=Promise.resolve(),syncLocked=false;
+  statusCloud('Synchronisé');
   let currentClassId=null,currentFolderId=null;
   let modalMode='new';
   let spinning=false,rotation=0,finishTimeout=null,tickTimer=null,audioCtx=null;
@@ -438,7 +505,26 @@ function initTeacherMode(){
 
   const homeSection=$('homeSection'), classSection=$('classSection'), folderSection=$('folderSection'), liveQuizSection=$('liveQuizSection');
 
-  function saveClasses(){localStorage.setItem(KEY,JSON.stringify(classes));}
+  function saveClasses(){
+    if(syncLocked){statusCloud('Conflit : exporte tes données avant de recharger',true);return;}
+    const snapshot=clone(classes);
+    statusCloud('Enregistrement en cours…');
+    syncQueue=syncQueue.then(async()=>{
+      if(syncLocked)return;
+      const uid=sbSession.user.id;
+      if(!remoteStamp){
+        const rows=await sbAuthed('/rest/v1/teacher_workspace',{method:'POST',headers:{Prefer:'return=representation'},body:JSON.stringify({user_id:uid,classes:snapshot})});
+        if(!rows?.length)throw new Error('Impossible de confirmer la création');
+        remoteStamp=rows[0].updated_at;
+      }else{
+        const stamp=new Date().toISOString();
+        const rows=await sbAuthed('/rest/v1/teacher_workspace?user_id=eq.'+encodeURIComponent(uid)+'&updated_at=eq.'+encodeURIComponent(remoteStamp),{method:'PATCH',headers:{Prefer:'return=representation'},body:JSON.stringify({classes:snapshot,updated_at:stamp})});
+        if(!rows?.length){syncLocked=true;throw new Error('Les données ont changé sur un autre appareil. Exporte les données locales avant de recharger.');}
+        remoteStamp=rows[0].updated_at;
+      }
+      statusCloud('Synchronisé ✓');
+    }).catch(error=>{syncLocked=true;statusCloud('Synchronisation interrompue : '+error.message,true);alert('Sauvegarde en ligne impossible : '+error.message+'\nUtilise Exporter avant de fermer cette page.');});
+  }
   function loadClasses(){try{let saved=JSON.parse(localStorage.getItem(KEY));if(Array.isArray(saved))return saved;for(const oldKey of ['mon-espace-fle-v6','mon-espace-fle-v5']){saved=JSON.parse(localStorage.getItem(oldKey));if(Array.isArray(saved)){localStorage.setItem(KEY,JSON.stringify(saved));return saved;}}return clone(starterClasses);}catch(e){return clone(starterClasses);}}
   function clone(v){return JSON.parse(JSON.stringify(v));}
   function getClass(){return classes.find(c=>c.id===currentClassId)}
@@ -560,6 +646,7 @@ function initTeacherMode(){
   $('folderBackBtn').onclick=()=>openClass(currentClassId); $('closeQuizBtn').onclick=requestEndQuiz;
   $('exportResultsBtn').onclick=exportResults; $('fullscreenBtn').onclick=()=>{const shell=$('projectionShell');if(!document.fullscreenElement) shell.requestFullscreen?.();else document.exitFullscreen?.();};
   $('prevSlideBtn').onclick=()=>{if(session&&session.slideIndex>0){session.slideIndex--;session.reveal=false;broadcastState();}}; $('nextSlideBtn').onclick=()=>{const quiz=session&&quizCatalog[session.quizId]; if(session&&session.slideIndex<quiz.slides.length){session.slideIndex++;session.reveal=false;broadcastState();}}; $('toggleRevealBtn').onclick=()=>{if(session){session.reveal=!session.reveal;broadcastState();}}; $('resetQuestionBtn').onclick=()=>{if(!session)return;session.participants.forEach(p=>{delete p.answers[session.slideIndex]}); session.questionResetCount++; session.reveal=false;broadcastState();};
+  $('logoutBtn').onclick=async()=>{if(!confirm('Te déconnecter de Mon espace FLE ?'))return;await syncQueue;try{await sbAuthed('/auth/v1/logout',{method:'POST'});}catch{}sessionStorage.removeItem(SESSION_KEY);location.reload();};
   $('exportBtn').onclick=()=>{const blob=new Blob([JSON.stringify(classes,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='mes-classes-fle.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),500);}; $('importBtn').onclick=()=>$('fileInput').click(); $('fileInput').onchange=async e=>{const file=e.target.files[0];if(!file)return;try{const data=JSON.parse(await file.text());if(!Array.isArray(data))throw Error();classes=data;saveClasses();renderHome();alert('Importation réussie.');}catch(err){alert('Impossible d\'importer ce fichier.');}finally{$('fileInput').value='';}};
   // Modal
   function openModal(mode){modalMode=mode;$('modalTitle').textContent=mode==='new'?'Ajouter une classe':'Renommer la classe';$('modalInput').value=mode==='edit'?(getClass()?.name||''):'';$('modal').classList.remove('hidden');$('modalInput').focus();}
@@ -571,7 +658,14 @@ function initTeacherMode(){
 }
 
 function initStudentMode(teacherId,quizId){
-  $('teacherApp').classList.add('hidden'); $('studentApp').classList.remove('hidden'); const wrap=$('studentContainer'); const hasPeer=typeof Peer!=='undefined'; if(!hasPeer){wrap.innerHTML='<div class="warn">La bibliothèque de connexion n\'est pas disponible.</div>'; return;} let peer=null,conn=null,myName='',currentState=null,localAnswers={},sessionFinished=false; renderJoin();
+  $('loginGate').classList.add('hidden');
+  $('teacherApp').classList.add('hidden');
+  $('studentApp').classList.remove('hidden');
+  const wrap=$('studentContainer');
+  const hasPeer=typeof Peer!=='undefined';
+  if(!hasPeer){wrap.innerHTML='<div class="warn">La bibliothèque de connexion n\'est pas disponible.</div>'; return;}
+  let peer=null,conn=null,myName='',currentState=null,localAnswers={},sessionFinished=false;
+  renderJoin();
   function renderJoin(){wrap.innerHTML=`<div class="student-head"><span class="pill">Connexion élève</span><h2 style="margin:12px 0 8px;font-family:Nunito,sans-serif;font-size:30px">Rejoindre le quiz</h2><p class="muted">Entrez votre prénom pour participer.</p></div><label class="field">Prénom <input id="studentNameInput" type="text" maxlength="40" placeholder="Votre prénom"></label><button id="studentJoinBtn" style="width:100%">Se connecter</button><p class="hint" style="margin-top:12px">Quiz : ${escapeHtml((quizCatalog[quizId]||{}).title||quizId||'activité')}</p>`; $('studentJoinBtn').onclick=join; $('studentNameInput').addEventListener('keydown',e=>{if(e.key==='Enter')join();});}
   function join(){myName=($('studentNameInput').value||'').trim().slice(0,40); if(!myName){alert('Veuillez saisir votre prénom.'); return;} wrap.innerHTML='<p class="muted">Connexion en cours…</p>'; peer=new Peer('student-'+Math.random().toString(36).slice(2,10)); peer.on('open',()=>{conn=peer.connect(teacherId); conn.on('open',()=>{conn.send({type:'join',name:myName,quizId}); renderWaiting('Connexion établie. En attente de la première question…');}); conn.on('data',data=>handleState(data)); conn.on('close',()=>{if(!sessionFinished)renderWaiting('La session a été fermée.');}); conn.on('error',()=>renderWaiting('Erreur de connexion.'));}); peer.on('error',()=>renderWaiting('Impossible de se connecter à la session.'));}
   function renderWaiting(text){wrap.innerHTML=`<div class="student-head"><span class="pill">${escapeHtml(myName||'Élève')}</span><h2 style="margin:12px 0 8px;font-family:Nunito,sans-serif;font-size:30px">En attente</h2><p class="muted">${escapeHtml(text)}</p></div>`;}
